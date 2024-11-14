@@ -1,0 +1,27 @@
+[package]
+name = "ama"
+version = "0.1.0"
+edition = "2021"
+authors = ["pyar6329<Tsukasa Arima>"]
+
+[lib]
+doctest = false
+
+[dependencies]
+anyhow = "1.0"
+thiserror = "1.0"
+tokio = { version = "1.40", default-features = false, features = ["rt-multi-thread", "macros", "signal"]}
+tokio-stream = { version = "0.1", features = ["net"]}
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"]}
+rustls = { version = "0.23", default-features = false, features = ["ring"]}
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+envy = "0.4"
+uuid = { version = "1.8", features = ["v4", "v7", "fast-rng", "macro-diagnostics", "serde"] }
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "multipart", "stream"] }
+strum = { version = "0.26", features = ["derive"] }
+derive_more = { version = "1.0", default-features = false, features = ["from", "deref", "display"] }
+url = { version = "2.5", features = ["serde"]}
+
