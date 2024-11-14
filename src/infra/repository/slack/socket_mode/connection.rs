@@ -107,18 +107,37 @@ pub struct ReceivedStreamHello {
     pub num_connections: u32,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReceivedStreamDisconnect {
+    #[serde(rename = "type")]
+    pub category: String,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, Deserialize, EnumIs)]
-#[serde(untagged)]
+#[serde(tag = "type")]
+// {"type":"hello"}, {"type":"events_api"}, {"type":"disconnect"} の条件分岐をserde(tag = "type")で行う
 pub enum ReceivedStreamData {
-    Hello(ReceivedStreamHello),
-    Body(ReceivedStreamDataBody),
+    #[serde(alias = "hello")]
+    Hello { num_connections: u32 },
+    #[serde(alias = "events_api")]
+    EventsApi {
+        #[serde(rename = "envelope_id")]
+        id: String,
+        payload: ReceivedStreamDataPayload,
+    },
+    #[serde(alias = "disconnect")]
+    Disconnect { reason: String },
 }
 
 impl ReceivedStreamData {
     pub fn get_body(&self) -> Option<ReceivedStreamDataBody> {
         use ReceivedStreamData::*;
         match self {
-            Body(body) => Some(body.to_owned()),
+            EventsApi { id, payload } => Some(ReceivedStreamDataBody {
+                id: id.to_owned(),
+                payload: payload.to_owned(),
+            }),
             _ => None,
         }
     }
@@ -170,7 +189,6 @@ impl SocketMode {
     }
 
     // ref: https://www.klab.com/jp/blog/tech/2021/0201-slack.html
-    // TODO: 受信したらACKを返さないと同じ文字列が何度も送られてくる
     pub async fn begin_stream(data: StreamData) -> Result<(), Error> {
         let mut stream = data.rx.await?;
         while let Some(s) = stream.next().await {
@@ -180,9 +198,15 @@ impl SocketMode {
                     if let Some(body_data) = body.get_body() {
                         let ack = SendStreamAcknowledge::new(&body_data.id);
                         debug!("send ack: {:?}", ack);
+                        // 受信したら3秒以内にACKを送信しないと同じメッセージが何度も送られてくる
                         let _ = stream
                             .send(Message::Text(serde_json::to_string(&ack)?))
                             .await;
+                    }
+                    if body.is_disconnect() {
+                        debug!("disconnect message received");
+                        // ここで再接続処理の実装
+                        break;
                     }
                     println!("Received a text message: {:?}", body);
                 }
