@@ -114,6 +114,38 @@ pub struct ReceivedStreamDisconnect {
     pub reason: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReceivedStreamShashCommandPayload {
+    pub trigger_id: String,
+    pub command: String,
+    #[serde(rename = "text")]
+    pub command_args: String,
+    // pub user_id: String,
+    pub user_name: String,
+    pub channel_id: String,
+    // pub channel_name: String,
+    // pub token: String
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReceivedStreamShashCommand {
+    #[serde(rename = "envelope_id")]
+    pub id: String,
+    pub payload: ReceivedStreamShashCommandPayload,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReceivedStreamInteractivePayload {
+    #[serde(rename = "type")]
+    pub category: String, //view_submission以外にも入ってきそう
+    pub view: ReceivedStreamInteractivePayloadView,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReceivedStreamInteractivePayloadView {
+    pub state: serde_json::Value,
+}
+
 #[derive(Debug, Clone, Deserialize, EnumIs)]
 #[serde(tag = "type")]
 // {"type":"hello"}, {"type":"events_api"}, {"type":"disconnect"} の条件分岐をserde(tag = "type")で行う
@@ -128,6 +160,18 @@ pub enum ReceivedStreamData {
     },
     #[serde(alias = "disconnect")]
     Disconnect { reason: String },
+    #[serde(alias = "slash_commands")]
+    SlashCommand {
+        #[serde(rename = "envelope_id")]
+        id: String,
+        payload: ReceivedStreamShashCommandPayload,
+    },
+    #[serde(alias = "interactive")]
+    Interactive {
+        #[serde(rename = "envelope_id")]
+        id: String,
+        payload: ReceivedStreamInteractivePayload,
+    },
 }
 
 impl ReceivedStreamData {
@@ -138,6 +182,27 @@ impl ReceivedStreamData {
                 id: id.to_owned(),
                 payload: payload.to_owned(),
             }),
+            _ => None,
+        }
+    }
+
+    pub fn get_command(&self) -> Option<ReceivedStreamShashCommand> {
+        use ReceivedStreamData::*;
+        match self {
+            SlashCommand { id, payload } => Some(ReceivedStreamShashCommand {
+                id: id.to_owned(),
+                payload: payload.to_owned(),
+            }),
+            _ => None,
+        }
+    }
+
+    pub fn get_id(&self) -> Option<String> {
+        use ReceivedStreamData::*;
+        match self {
+            EventsApi { id, .. } => Some(id.to_owned()),
+            SlashCommand { id, .. } => Some(id.to_owned()),
+            Interactive { id, .. } => Some(id.to_owned()),
             _ => None,
         }
     }
@@ -188,20 +253,26 @@ impl SocketMode {
         Ok(stream_data)
     }
 
+    // ref: https://api.slack.com/apis/socket-mode#connect
+    // TODO: 複数接続して切断しても別のstreamを使う感じにするといいっぽい
     // ref: https://www.klab.com/jp/blog/tech/2021/0201-slack.html
-    pub async fn begin_stream(data: StreamData) -> Result<(), Error> {
+    pub async fn begin_stream(data: StreamData, event_token: &str) -> Result<(), Error> {
         let mut stream = data.rx.await?;
         while let Some(s) = stream.next().await {
             match s {
                 Ok(Message::Text(msg)) => {
                     let body = parse_body(&msg)?;
-                    if let Some(body_data) = body.get_body() {
-                        let ack = SendStreamAcknowledge::new(&body_data.id);
+                    if let Some(id) = body.get_id() {
+                        let ack = SendStreamAcknowledge::new(&id);
                         debug!("send ack: {:?}", ack);
                         // 受信したら3秒以内にACKを送信しないと同じメッセージが何度も送られてくる
                         let _ = stream
                             .send(Message::Text(serde_json::to_string(&ack)?))
                             .await;
+                    }
+                    if let Some(command) = body.get_command() {
+                        use crate::infra::repository::slack::create_modal;
+                        let _ = create_modal(&event_token, &command.payload.trigger_id).await?;
                     }
                     if body.is_disconnect() {
                         debug!("disconnect message received");

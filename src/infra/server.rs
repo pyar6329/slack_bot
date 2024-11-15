@@ -17,7 +17,7 @@ pub async fn run() -> Result<(), Error> {
     let socket_mode = SocketMode::get_url(&config.slack_bot_socket_mode_token).await?;
     let socket = socket_mode.connect().await?;
 
-    let _ = SocketMode::begin_stream(socket).await?;
+    let _ = SocketMode::begin_stream(socket, &config.slack_bot_token).await?;
 
     Ok(())
 }
